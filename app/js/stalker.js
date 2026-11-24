@@ -77,28 +77,26 @@
         });
     }
     function busy(e) { return !!e && (e.status === 429 || e.status === 503); }
-    function debugText(text) {
-        return TV.redact(String(text))
-            .replace(/(["'][^"']*token[^"']*["']\s*:\s*")[^"]*(")/gi, "$1***$2")
-            .slice(0, 4000);
-    }
     function req(src, api, params, token, timeout, tries) {
         tries = tries || 0;
         var url = api + "?" + params + (params.indexOf("JsHttpRequest") < 0 ? "&JsHttpRequest=1-xml" : "");
-        var h = headers(src, token), debugHeaders = {};
-        Object.keys(h).forEach(function (name) { debugHeaders[name] = /^authorization$/i.test(name) ? "Bearer ***" : h[name]; });
-        TV.log("stalker: request URL: " + debugText(url));
-        TV.log("stalker: request headers: " + debugText(JSON.stringify(debugHeaders)));
+        var h = headers(src, token);
+        if (TV.DEV) {
+            var debugHeaders = {};
+            Object.keys(h).forEach(function (name) { debugHeaders[name] = h[name]; });
+            TV.log("stalker: request URL: " + String(url).slice(0, 4000));
+            TV.log("stalker: request headers: " + JSON.stringify(debugHeaders).slice(0, 4000));
+        }
         return gate(src, function () { return TV.helper.sget(url, h, timeout); }).then(function (text) {
             var j = null;
             try { j = JSON.parse(text); } catch (e) {
-                TV.log("stalker: non-JSON response: " + debugText(text));
+                if (TV.DEV) TV.log("stalker: non-JSON response: " + String(text).slice(0, 4000));
                 throw new Error(/authoriz|forbidden|access denied/i.test(text) ? T("The portal refused this MAC address.") : T("The portal did not answer as a Stalker portal."));
             }
-            TV.log("stalker: response JSON: " + debugText(JSON.stringify(j, null, 2)));
+            if (TV.DEV) TV.log("stalker: response JSON: " + JSON.stringify(j, null, 2).slice(0, 4000));
             return j && j.js !== undefined ? j.js : j;
         }, function (e) {
-            if (e && (e.status || e.body)) TV.log("stalker: HTTP " + (e.status || "error") + " response: " + debugText(e.body || e.message || ""));
+            if (TV.DEV && e && (e.status || e.body)) TV.log("stalker: HTTP " + (e.status || "error") + " response: " + String(e.body || e.message || "").slice(0, 4000));
             if (e && e.old) throw new Error(T("Stalker portals need the new install of APL TV: run APL Launcher Setup again (Samsung) or install the latest .ipk (LG) or .apk (Android) once."));
             if (busy(e)) {
                 var g = gateOf(src);
