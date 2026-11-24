@@ -24,3 +24,9 @@ android/app/src/main/res/drawable/banner.png
 *.apk
 *.jks
 *.keystore
+
+# VSCODE
+.vscode/
+
+# Temporary files
+*_pycache__/

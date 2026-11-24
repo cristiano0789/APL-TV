@@ -18,8 +18,8 @@
     "use strict";
 
     var LOADER = 1;
-    var REPO = "Knikt/APL-TV";
-    var BRANCH = "main";
+    var REPO = "cristiano0789/APL-TV";
+    var BRANCH = "custom";
     var BUILD = global.TV_BUILD || { version: "0", scripts: [], styles: [] };
     var RAW = "https://raw.githubusercontent.com/" + REPO + "/" + BRANCH + "/app/";
     var KEY = "apltv.bundle";

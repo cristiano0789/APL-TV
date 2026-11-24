@@ -126,9 +126,7 @@
                 return req(src, api, "type=stb&action=handshake&token=&prehash=0", null, 20000).then(function (j) {
                     var token = j && j.token;
                     if (!token) throw new Error(T("The portal did not answer as a Stalker portal."));
-                    var prof = "type=stb&action=get_profile&hd=1&ver=" + encodeURIComponent("ImageDescription: 0.2.18-r23-250; PORTAL version: 5.6.1; API Version: JS API version: 343;") +
-                               "&num_banks=2&sn=" + encodeURIComponent(src.sn || "") + "&stb_type=MAG250&client_type=STB&image_version=218&video_out=hdmi&device_id=" + encodeURIComponent(src.id1 || "") +
-                               "&device_id2=" + encodeURIComponent(src.id2 || "") + "&signature=&auth_second_step=1&hw_version=1.7-BD-00&not_valid_token=0&timestamp=" + Math.floor(Date.now() / 1000) + "&api_signature=262&prehash=0";
+                    var prof = "type=stb&action=get_profile&hd=1&num_banks=2&client_type=STB&video_out=hdmi&auth_second_step=0&not_valid_token=0&JsHttpRequest=1-xml";
                     return req(src, api, prof, token, 20000).then(function (p) {
                         if (p && (p.status === 1 || p.blocked === "1") && !p.id) throw new Error(T("The portal refused this MAC address."));
                         var ses = { api: api, token: token, at: Date.now(), profile: p || {}, key: normPortal(src.portal) + "|" + normMac(src.mac) };

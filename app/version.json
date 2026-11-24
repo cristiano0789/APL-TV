@@ -1,8 +1,8 @@
 {
- "version": "1.4.13",
+ "version": "1.4.131",
  "loader": 1,
  "reinstall": "1.0.1",
- "notes": "Without SF Pro, APL TV now uses Inter Display, the free font closest to it.",
+ "notes": "Custom build 1.4.131",
  "platforms": {
   "tizen": {
    "reinstall": "1.0.1"
