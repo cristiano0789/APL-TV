@@ -19,7 +19,7 @@
     "use strict";
 
     var TV = global.TV, T = TV.t, S = TV.smart;
-    var UA = "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) MAG200 stbapp ver: 2 rev: 250 Safari/533.3";
+    var UA = "Mozilla/5.0 (Linux; Android 14; SmartTV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.270 Safari/537.36";
     var sessions = {};            // source id -> { api, token, at }
     var logins = {};              // source id -> the connection being made (one at a time: a new token can end the others)
     // 80,000 movies and as many series (#30: a portal with more than 40,000 movies); 40,000 on a device with little memory
@@ -77,14 +77,28 @@
         });
     }
     function busy(e) { return !!e && (e.status === 429 || e.status === 503); }
+    function debugText(text) {
+        return TV.redact(String(text))
+            .replace(/(["'][^"']*token[^"']*["']\s*:\s*")[^"]*(")/gi, "$1***$2")
+            .slice(0, 4000);
+    }
     function req(src, api, params, token, timeout, tries) {
         tries = tries || 0;
         var url = api + "?" + params + (params.indexOf("JsHttpRequest") < 0 ? "&JsHttpRequest=1-xml" : "");
-        return gate(src, function () { return TV.helper.sget(url, headers(src, token), timeout); }).then(function (text) {
+        var h = headers(src, token), debugHeaders = {};
+        Object.keys(h).forEach(function (name) { debugHeaders[name] = /^authorization$/i.test(name) ? "Bearer ***" : h[name]; });
+        TV.log("stalker: request URL: " + debugText(url));
+        TV.log("stalker: request headers: " + debugText(JSON.stringify(debugHeaders)));
+        return gate(src, function () { return TV.helper.sget(url, h, timeout); }).then(function (text) {
             var j = null;
-            try { j = JSON.parse(text); } catch (e) { throw new Error(/authoriz|forbidden|access denied/i.test(text) ? T("The portal refused this MAC address.") : T("The portal did not answer as a Stalker portal.")); }
+            try { j = JSON.parse(text); } catch (e) {
+                TV.log("stalker: non-JSON response: " + debugText(text));
+                throw new Error(/authoriz|forbidden|access denied/i.test(text) ? T("The portal refused this MAC address.") : T("The portal did not answer as a Stalker portal."));
+            }
+            TV.log("stalker: response JSON: " + debugText(JSON.stringify(j, null, 2)));
             return j && j.js !== undefined ? j.js : j;
         }, function (e) {
+            if (e && (e.status || e.body)) TV.log("stalker: HTTP " + (e.status || "error") + " response: " + debugText(e.body || e.message || ""));
             if (e && e.old) throw new Error(T("Stalker portals need the new install of APL TV: run APL Launcher Setup again (Samsung) or install the latest .ipk (LG) or .apk (Android) once."));
             if (busy(e)) {
                 var g = gateOf(src);
