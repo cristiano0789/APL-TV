@@ -1,8 +1,8 @@
 {
- "version": "1.4.15.1",
+ "version": "1.4.16.1",
  "loader": 1,
  "reinstall": "1.0.1",
- "notes": "APL TV 1.4.15.1: Update version to 1.4.15.1 and adjust release workflow for package builds",
+ "notes": "Sports: the Others button and 4K channels in the right language; seasons that follow your choice and a poster behind series without a background.",
  "platforms": {
   "tizen": {
    "reinstall": "1.0.1"
