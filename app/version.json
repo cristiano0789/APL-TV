@@ -1,8 +1,8 @@
 {
- "version": "1.4.151",
+ "version": "1.4.15.1",
  "loader": 1,
  "reinstall": "1.0.1",
- "notes": "APL TV 1.4.151: bugfixes, new features, and updated translations.",
+ "notes": "APL TV 1.4.15.1: Update version to 1.4.15.1 and adjust release workflow for package builds",
  "platforms": {
   "tizen": {
    "reinstall": "1.0.1"

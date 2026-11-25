@@ -1,18 +1,15 @@
 name: Package
 
-# Builds the three packages on every push to main and every pull request; a v* tag also publishes
+# Builds the two packages only for a new v* tag
 # them in a GitHub Release, each with its SHA256:
 #   apl-tv-vX.Y.Z.wgt              Samsung (Tizen). Signed with the Tizen SDK's default certificate:
 #                                  APL Launcher Setup (or Apps2Samsung) signs it again for each screen.
-#   apl-tv-vX.Y.Z-lg-webos.ipk     LG (webOS), with apl-tv.manifest.json for the Homebrew Channel.
 #   apl-tv-vX.Y.Z-android.apk      Android TV, Google TV, Fire TV. Signed with the project's key, from
 #                                  the repository's secrets ANDROID_KEYSTORE_B64 (the .jks in base64) and
 #                                  ANDROID_KEYSTORE_PASS: a tag without them does not publish anything.
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  pull_request:
 
 # Only the release job writes: the package job runs the downloaded Tizen tools.
 permissions:
@@ -69,32 +66,6 @@ jobs:
           name: APL-TV-wgt
           path: dist/
 
-  ipk:
-    name: APL TV .ipk (LG webOS)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - name: LG's webOS CLI and Pillow
-        run: |
-          npm install -g @webos-tools/cli@3.2.6
-          python3 -m pip install --quiet pillow
-      - name: Build the package
-        run: python3 tools/make-webos.py --release
-      - uses: actions/upload-artifact@v4
-        with:
-          name: APL-TV-ipk
-          path: |
-            dist/apl-tv-v*-lg-webos.ipk
-            dist/SHA256SUMS-ipk.txt
-            dist/apl-tv.manifest.json
-
   apk:
     name: APL TV .apk (Android TV)
     runs-on: ubuntu-24.04
@@ -142,7 +113,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [wgt, ipk, apk]
+    needs: [wgt, apk]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -154,7 +125,7 @@ jobs:
       - name: Every package is there
         run: |
           ls -l dist
-          for f in dist/apl-tv-v*.wgt dist/apl-tv-v*-lg-webos.ipk dist/apl-tv-v*-android.apk dist/SHA256SUMS-wgt.txt dist/SHA256SUMS-ipk.txt dist/SHA256SUMS-apk.txt; do
+          for f in dist/apl-tv-v*.wgt dist/apl-tv-v*-android.apk dist/SHA256SUMS-wgt.txt dist/SHA256SUMS-apk.txt; do
             [ -e "$f" ] || { echo "::error::missing $f" >&2; exit 1; }
           done
       # The same .apk under a name that never changes: .../releases/latest/download/apl-tv-android.apk
@@ -166,9 +137,6 @@ jobs:
           files: |
             dist/apl-tv-v*.wgt
             dist/SHA256SUMS-wgt.txt
-            dist/apl-tv-v*-lg-webos.ipk
-            dist/SHA256SUMS-ipk.txt
-            dist/apl-tv.manifest.json
             dist/apl-tv-v*-android.apk
             dist/apl-tv-android.apk
             dist/SHA256SUMS-apk.txt

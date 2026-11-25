@@ -6,7 +6,7 @@ Run it after every change, before publishing on GitHub:
 Writes:
   app/version.json  read by the screens (js/updater.js) to update themselves from GitHub
   app/js/build.js   what the installed version (.wgt) contains, for js/boot.js
-The version comes from app/config.xml (version="..." attribute).
+  app/js/app.js and app/service/service.js with the version from app/config.xml
 """
 import json, os, re, sys
 
@@ -96,6 +96,19 @@ def write_compat():
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(css)
 
+def write_app_versions(version):
+    for path, pattern in (
+        (os.path.join(A, "js", "app.js"), r'(TV\.VERSION = ")[^"]+(";)'),
+        (os.path.join(A, "service", "service.js"), r'(VERSION = ")[^"]+(";)'),
+    ):
+        text = open(path, encoding="utf-8").read()
+        updated, count = re.subn(pattern, lambda m: m.group(1) + version + m.group(2), text, count=1)
+        if count != 1:
+            sys.exit("could not update version in " + os.path.relpath(path, ROOT))
+        if updated != text:
+            with open(path, "w", encoding="utf-8", newline="\n") as f:
+                f.write(updated)
+
 def build(notes=""):
     config = open(os.path.join(A, "config.xml"), encoding="utf-8").read()
     version = re.search(r'<widget[^>]*\sversion="([^"]+)"', config).group(1)
@@ -119,6 +132,7 @@ if __name__ == "__main__":
         except Exception: notes = ""
     write_compat()
     version, manifest, build_js = build(notes)
+    write_app_versions(version)
     with open(os.path.join(A, "version.json"), "w", encoding="utf-8", newline="\n") as f:
         json.dump(manifest, f, ensure_ascii=False, indent=1); f.write("\n")
     with open(os.path.join(A, "js", "build.js"), "w", encoding="utf-8", newline="\n") as f:
