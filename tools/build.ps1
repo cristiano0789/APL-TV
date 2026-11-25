@@ -23,6 +23,39 @@ $app = Join-Path $root "app"
 $dist = Join-Path $root "dist"
 $work = Join-Path $dist "work"
 $appId = "APLTVMedia.TV"; $pkg = "APLTVMedia"
+$sdb = Join-Path (Split-Path (Split-Path (Split-Path $TizenCli))) "sdb.exe"
+
+if ($Install -and [string]::IsNullOrWhiteSpace($Ip)) {
+    if (-not (Test-Path -LiteralPath $sdb)) { throw "sdb.exe not found next to Tizen Studio ($sdb)" }
+    $deviceOutput = & $sdb devices
+    if ($LASTEXITCODE -ne 0) { throw "Could not read connected Tizen targets using sdb." }
+
+    $targets = @()
+    foreach ($line in $deviceOutput) {
+        if ($line -match '^\s*((?:\d{1,3}\.){3}\d{1,3}):\d+\s+device(?:\s+(.*))?$') {
+            $targets += [PSCustomObject]@{ Ip = $matches[1]; Name = $matches[2] }
+        }
+    }
+
+    if ($targets.Count -eq 1) {
+        $Ip = $targets[0].Ip
+        Write-Host "Using connected Tizen TV $Ip ($($targets[0].Name))." -ForegroundColor Cyan
+    } elseif ($targets.Count -gt 1) {
+        Write-Host "Multiple Tizen TVs are connected through the Tizen Extension:" -ForegroundColor Cyan
+        for ($i = 0; $i -lt $targets.Count; $i++) {
+            Write-Host ("  {0}. {1} {2}" -f ($i + 1), $targets[$i].Ip, $targets[$i].Name)
+        }
+        $selection = 0
+        while ($selection -lt 1 -or $selection -gt $targets.Count) {
+            $answer = Read-Host "Choose a TV by number"
+            if (-not [int]::TryParse($answer, [ref]$selection)) { $selection = 0 }
+        }
+        $Ip = $targets[$selection - 1].Ip
+    } else {
+        $Ip = Read-Host "No connected Tizen TV was found. Enter the TV IP address"
+    }
+    if ([string]::IsNullOrWhiteSpace($Ip)) { throw "A TV IP address is required for installation." }
+}
 
 $version = ([regex]::Match((Get-Content -LiteralPath (Join-Path $app "config.xml") -Raw), '<widget[^>]*\sversion="([^"]+)"')).Groups[1].Value
 Write-Host "APL TV $version" -ForegroundColor Cyan
@@ -30,6 +63,13 @@ Write-Host "APL TV $version" -ForegroundColor Cyan
 # ---------- copy, without what must not be in the package ----------
 if (Test-Path $work) { Remove-Item -LiteralPath $work -Recurse -Force }
 New-Item -ItemType Directory -Force -Path $work | Out-Null
+$devLocal = Join-Path $app "js\dev.local.js"
+if ($Dev -and -not (Test-Path -LiteralPath $devLocal)) {
+    Set-Content -LiteralPath $devLocal -Value @(
+        "window.TV = window.TV || {};"
+        "window.TV.DEV = true;"
+    ) -Encoding UTF8
+}
 Copy-Item -Path (Join-Path $app "*") -Destination $work -Recurse -Force
 Get-ChildItem -LiteralPath $work -Recurse -File | Where-Object { $_.Name -like "*signature*.xml" -or $_.Name -eq ".manifest.tmp" -or $_.Extension -eq ".wgt" } | ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force -Confirm:$false }
 if (-not $Dev) {
@@ -75,7 +115,6 @@ try { $vetro = [bool](Invoke-RestMethod -Uri "$base/exec" -Method Post -ContentT
 # ---------- no Vetro: Developer Mode (sdb), like any app ----------
 if (-not $vetro) {
     Write-Host "Vetro does not answer: installing in Developer Mode." -ForegroundColor Cyan
-    $sdb = Join-Path (Split-Path (Split-Path (Split-Path $TizenCli))) "sdb.exe"
     if (-not (Test-Path -LiteralPath $sdb)) { throw "sdb.exe not found next to Tizen Studio ($sdb)" }
     & $sdb connect "$Ip`:26101" | Out-Host
     $serial = (& $sdb devices | Select-String -SimpleMatch $Ip | Select-Object -First 1)
