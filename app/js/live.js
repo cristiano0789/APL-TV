@@ -15,7 +15,7 @@
     var TV = global.TV, el = TV.el, esc = TV.esc, T = TV.t, D = TV.data;
     var FULL = [0, 0, 1920, 1080];
     var root, hero, wait, chipStrip, cardsBox, nextBox, hint, cards, chipEls = [], cats = [], catIndex = 0, chipScroll = 0;
-    var zone = "cards", playing = null, visible = false, built = false, previewTimer = null, chipTimer = null;
+    var zone = "cards", playing = null, resumeChannel = null, visible = false, built = false, previewTimer = null, chipTimer = null, qualityStatsAt = 0;
 
     function build() {
         root = TV.$("v-live");
@@ -106,7 +106,7 @@
             chipStrip.style.transform = "translateX(" + (-chipScroll) + "px)";
         }
     }
-    function loadCategory(keepId) {
+    function loadCategory(keepId, noPreview) {
         var c = cats[catIndex];
         if (!c || c.id === "pick") return;
         TV.setPref("liveCat", c.id);
@@ -121,7 +121,7 @@
         TV.epg.ensure(items.slice(Math.max(0, idx - 3), idx + 8));
         showInfo(cards.current());
         infoFor = cards.current();          // so the header follows when the guide arrives after (view.refresh)
-        schedulePreview(cards.current());
+        if (!noPreview) schedulePreview(cards.current());
     }
 
     /* ---------- channel cards ---------- */
@@ -131,7 +131,8 @@
         var c = el("div", "lcard" + (playing && playing.id === ch.id ? " is-playing" : "")), art = el("div", "lcard__art"), logo = el("div", "lcard__logo");
         TV.logoBox(logo, ch);
         art.appendChild(el("span", "lcard__num", String(ch.num)));
-        if (ch.q && ch.q !== "SD") art.appendChild(el("span", "lcard__q", esc(ch.q)));
+        var quality = TV.smart.channelQuality(ch);
+        if (quality) art.appendChild(el("span", "lcard__q", esc(quality)));
         art.appendChild(logo);
         var n = TV.epg.now(ch), cur = n && n.cur;
         var b = el("div", "lcard__bar"); b.innerHTML = "<i style='width:" + Math.round(TV.epg.progress(cur) * 100) + "%'></i>";
@@ -202,8 +203,51 @@
         for (var k in cards.cards) { var it = cards.items[k]; cards.cards[k].classList.toggle("is-playing", !!(playing && it && it.id === playing.id)); }
     }
     /* url: another address for the channel (timeshift: the helper's copy of it); more: callbacks of the caller too */
+    function variantGroup(ch) {
+        if (!ch) return null;
+        if (ch.variants && ch.variants.length > 1) return ch.variants;
+        if (!TV.pref("mergeQuality") || !ch.cat) return null;
+        var items = D.channelsIn(ch.cat);
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].variants && items[i].variants.some(function (v) { return v.id === ch.id; })) return items[i].variants;
+        }
+        return null;
+    }
+    function updatePlayingQuality(ch) {
+        var now = Date.now();
+        if (now - qualityStatsAt < 4000 || !playing || playing.id !== ch.id) return;
+        qualityStatsAt = now;
+        if (!TV.smart.rememberChannelQuality(ch, TV.player.stats())) return;
+        D.regroup();
+        if (visible && cards) {
+            var current = cards.current();
+            loadCategory(current && current.id, true);
+        }
+        if (TV.osd.qualityChanged) TV.osd.qualityChanged(ch.id);
+    }
+    function variantKey(ch) { return [ch.src || "", ch.cat || "", ch.key || ch.id].join("|"); }
+    function preferredVariant(ch) {
+        if (!ch || !ch.variants || ch.variants.length < 2) return ch;
+        var id = (TV.pref("channelVariants") || {})[variantKey(ch)];
+        if (!id) return ch;
+        for (var i = 0; i < ch.variants.length; i++) if (ch.variants[i].id === id) return ch.variants[i];
+        return ch;
+    }
+    function rememberVariant(ch) {
+        var variants = variantGroup(ch);
+        if (!variants || variants.length < 2) return;
+        var key = variantKey(variants[0]), prefs = TV.pref("channelVariants") || {};
+        if (prefs[key] === ch.id) return;
+        var next = {};
+        Object.keys(prefs).forEach(function (k) { next[k] = prefs[k]; });
+        next[key] = ch.id;
+        TV.setPref("channelVariants", next);
+    }
     function playChannel(ch, rect, url, more) {
         if (!built) build();
+        ch = preferredVariant(ch);
+        qualityStatsAt = 0;
+        resumeChannel = null;
         playing = ch;
         markPlaying();
         wait.classList.remove("is-hidden");
@@ -232,11 +276,11 @@
             return true;
         }
         TV.player.play(addr, {
-            live: true, rect: rect || FULL, uhd: ch.q === "4K",
+            live: true, rect: rect || FULL, uhd: TV.smart.channelQuality(ch) === "4K",
             onBuffering: function (b) { if (TV.osd.isOpen()) TV.osd.buffering(b); else wait.classList.toggle("is-hidden", !b); },
-            onPlaying: function () { wait.classList.add("is-hidden"); if (TV.osd.isOpen()) TV.osd.buffering(false); },
+            onPlaying: function () { wait.classList.add("is-hidden"); if (TV.osd.isOpen()) TV.osd.buffering(false); updatePlayingQuality(ch); },
             // the picture moves: no spinner left, in Live TV or full screen
-            onTime: function (ms) { seen = true; if (!wait.classList.contains("is-hidden")) wait.classList.add("is-hidden"); if (TV.osd.isOpen()) TV.osd.buffering(false); if (more.onTime) more.onTime(ms); },
+            onTime: function (ms) { seen = true; if (!wait.classList.contains("is-hidden")) wait.classList.add("is-hidden"); if (TV.osd.isOpen()) TV.osd.buffering(false); updatePlayingQuality(ch); if (more.onTime) more.onTime(ms); },
             onReconnect: function (n) {
                 if (n >= 2 && tryTs(true)) return;
                 if (TV.osd.isOpen()) TV.osd.buffering(true); else wait.classList.remove("is-hidden");
@@ -254,8 +298,10 @@
         });
     }
 
-    function fullScreen(ch, ctx) {
+    function fullScreen(ch, ctx, keepBehind) {
         if (!built) build();
+        if (!keepBehind && (!ch.variants || ch.variants.length < 2)) rememberVariant(ch);
+        ch = preferredVariant(ch);
         // the same channel opened again after it was stopped (from Home, the Guide…): it starts again
         if (!playing || playing.id !== ch.id || TV.player.state() === "NONE") playChannel(ch, FULL);
         else TV.player.setRect(FULL);
@@ -263,7 +309,11 @@
         TV.osd.live(ch, ctx, function onClose(last) {
             // Back from full screen: the interface comes back over the same picture
             if (last) { playing = last; select(last.id); markPlaying(); }
-            if (!visible) { TV.player.stop(); playing = null; }
+            if (!visible && !keepBehind) {
+                var current = TV.shell && TV.shell.current();
+                if (current === "home") TV.shell.go("live");
+                else if (current !== "guide" && current !== "live") { TV.player.stop(); playing = null; }
+            }
         }, function onZap(c) { playing = c; });
     }
     function select(id) {
@@ -324,7 +374,7 @@
         }));
         if (ch.variants && ch.variants.length > 1) items.push({ label: T("Quality"), icon: "quality", run: function () {
             TV.menu(T("Quality"), ch.variants.map(function (v) {
-                return { label: (v.q || T("Standard")) + "  ·  " + (v.raw || v.name), check: playing && playing.id === v.id, run: function () { fullScreen(v); } };
+                return { label: (TV.smart.channelQuality(v) || T("Standard")) + "  ·  " + (v.raw || v.name), check: playing && playing.id === v.id, run: function () { fullScreen(v); } };
             }));
         } });
         TV.menu(ch.num + "  " + ch.name, items);
@@ -415,6 +465,9 @@
         show: function () {
             if (!built) build();
             visible = true;
+            var resume = resumeChannel;
+            resumeChannel = null;
+            if (resume) playing = resume;
             document.body.classList.add("in-live");
             cats = categories();
             buildChips();
@@ -424,14 +477,15 @@
             for (var i = 0; i < cats.length; i++) if (cats[i].id === want) { catIndex = i; break; }
             zone = "cards";
             paintChips();
-            loadCategory(TV.pref("lastChannel"));
+            loadCategory((resume && resume.id) || (playing && playing.id) || TV.pref("lastChannel"));
+            if (resume && TV.player.state() === "NONE") playChannel(resume, FULL);
             this.blur();
         },
-        hide: function () {
+        hide: function (next) {
             visible = false;
             clearTimeout(previewTimer);
             document.body.classList.remove("in-live");
-            if (!TV.osd.isOpen() && !TV.multiview.isOpen()) { TV.player.stop(); playing = null; }
+            if (next !== "guide" && !TV.osd.isOpen() && !TV.multiview.isOpen()) { TV.player.stop(); playing = null; }
         },
         enter: function () { zone = cards.items.length ? "cards" : "chips"; cards.setActive(zone === "cards"); paintChips(); schedulePreview(cards.current()); },
         blur: function () { cards.setActive(false); paintChips(); },
@@ -586,7 +640,7 @@
     var frozeAt = {};
     TV.player.onVideoStall = function (dropped) {
         var ch = playing;
-        TV.log("picture frozen" + (ch ? " on " + ch.name + " " + (ch.q || "") : "") + " (" + dropped + " frames dropped)");
+        TV.log("picture frozen" + (ch ? " on " + ch.name + " " + TV.smart.channelQuality(ch) : "") + " (" + dropped + " frames dropped)");
         if (!ch) return;
         var cur = TV.player.current(), rect = (cur && cur.opts && cur.opts.rect) || FULL, now = Date.now();
         var again = frozeAt[ch.id] && now - frozeAt[ch.id] < 120000;
@@ -602,12 +656,24 @@
         }
         var group = null;
         D.channelsIn(ch.cat).forEach(function (x) { if (x.id === ch.id || (x.variants && x.variants.some(function (v) { return v.id === ch.id; }))) group = x; });
-        var S = TV.smart, all = (group && group.variants) || [], r = S.qualityRank(ch.q), next = null;
-        all.forEach(function (v) { if (!next && v.id !== ch.id && S.qualityRank(v.q) < r) next = v; });
-        if (ch.q === "4K" && TV.noUhd) { TV.noUhd(); D.regroup(); }
+        var S = TV.smart, all = (group && group.variants) || [], quality = S.channelQuality(ch), r = S.qualityRank(quality), next = null;
+        all.forEach(function (v) { if (!next && v.id !== ch.id && S.qualityRank(S.channelQuality(v)) < r) next = v; });
+        if (quality === "4K" && TV.noUhd) { TV.noUhd(); D.regroup(); }
         if (!next) return;
-        TV.toast(T("Picture frozen: switching to {quality}", { quality: next.q || T("Standard") }));
+        TV.toast(T("Picture frozen: switching to {quality}", { quality: S.channelQuality(next) || T("Standard") }));
         playChannel(next, rect);
     };
-    TV.live = { play: function (ch, ctx) { fullScreen(ch, ctx); }, findNumber: findNumber, playChannel: function (ch, rect, url, more) { playChannel(ch, rect, url, more); }, pickCategory: pickCategory, guideMenu: guideMenu };
+    TV.live = {
+        play: function (ch, ctx) { fullScreen(ch, ctx); },
+        promoteChannel: function (ch) { fullScreen(ch, null, true); },
+        playingChannel: function () { return playing; },
+        deferResume: function () { resumeChannel = TV.player.state() === "NONE" ? null : playing; },
+        findNumber: findNumber,
+        playChannel: function (ch, rect, url, more) {
+            if (!ch.variants || ch.variants.length < 2) rememberVariant(ch);
+            playChannel(ch, rect, url, more);
+        },
+        pickCategory: pickCategory,
+        guideMenu: guideMenu
+    };
 })(window);

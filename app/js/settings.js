@@ -10,7 +10,7 @@
     "use strict";
 
     var TV = global.TV, el = TV.el, esc = TV.esc, T = TV.t, D = TV.data;
-    var root, heroIcon, heroDesc, listWrap, listEl, nav, pages = [], visible = false, pollTimer = null;
+    var root, heroIcon, heroDesc, listWrap, listEl, nav, pages = [], visible = false, pollTimer = null, progressTimer = null, progressSnapshot = "", progressValueEls = {};
 
     function build() {
         root = TV.$("v-settings");
@@ -27,11 +27,12 @@
 
     /* ---------- pages ---------- */
     function fmtCount(src) {
-        if (src.off) return T("Off");
+        if (src.off && !src.error) return T("Off");
         var ld = D.loadingOf && D.loadingOf(src.id);
         if (ld && ld.share) return T("Loading {p} %", { p: Math.round(ld.share * 100) });
-        if (src.type === "stremio" && !src.error) return T("{n} addons", { n: (src.addons || []).length });
         if (src.error) return T("Error");
+        if (src.off) return T("Off");
+        if (src.type === "stremio" && !src.error) return T("{n} addons", { n: (src.addons || []).length });
         var c = src.counts;
         if (!c) return T("Not loaded");
         var bits = [];
@@ -51,16 +52,17 @@
     function ownLibrary(s) { return s.type === "jellyfin" || s.type === "plex" || s.type === "stremio" || s.type === "free"; }
     function typeIcon(s) { return s.type === "m3u" ? "list" : ownLibrary(s) ? "film" : "link"; }
     function mainPage() {
-        var rows = [{ section: T("Playlists") }];
-        D.sources().forEach(function (s) {
-            rows.push({ label: s.name, value: fmtCount(s), acc: "chevron", icon: typeIcon(s),
+        var sources = D.sources(), rows = [{ section: T("Playlists") }];
+        sources.forEach(function (s) {
+            rows.push({ label: s.name, value: fmtCount(s), progressSource: s.id, acc: "chevron", icon: typeIcon(s),
                 desc: typeLabel(s) + (s.error ? "\n" + s.error : "") + (s.at ? "\n" + T("Updated {d}", { d: new Date(s.at).toLocaleString(TV.locale) }) : "") +
                       (s.account && s.account.exp ? "\n" + T("Subscription ends {d}", { d: new Date(s.account.exp).toLocaleDateString(TV.locale) }) : ""),
                 run: function () { push(sourcePage(s.id)); } });
         });
-        if (D.sources().length) rows.push({ label: T("Edit on Your Phone"), acc: "chevron", icon: "phone", desc: T("Hide and order your categories, make your groups of channels, order your favorites, rename or hide channels on your phone, then send it all to the TV."),
+        if (sources.length) rows.push({ label: T("Edit on Your Phone"), acc: "chevron", icon: "phone", desc: T("Hide and order your categories, make your groups of channels, order your favorites, rename or hide channels on your phone, then send it all to the TV."),
             run: function () { push(editPhonePage()); } });
         rows.push({ label: T("Add a Playlist"), acc: "chevron", icon: "plus", desc: T("Your M3U playlist, your Xtream account, a Stalker portal, or your own media server (Jellyfin, Emby, Plex)."), run: function () { push(addPage()); } });
+        if (sources.length) rows.push({ label: T("Refresh All Playlists"), icon: "refresh", run: function () { refreshAll(); } });
         rows.push({ section: T("Playback") });
         rows.push(toggleRow(T("Automatic Preview"), "autoPreview", T("In Live TV, staying on a channel plays it behind the list. Off: a channel only plays when you press OK.")));
         rows.push(toggleRow(T("Keep the Channel in the Guide"), "guideKeep", T("In the TV Guide, the channel you were watching keeps playing behind it while you look at the others. OK changes the channel.")));
@@ -93,6 +95,15 @@
             desc: T("When the sound and the picture don't match: later if you hear the words before the lips move, earlier if after. Applies at once, even while watching."),
             run: function () { choose(T("Sound Delay (AV Sync)"), "audioDelay", delaySteps().map(function (n) { return [n, delayLabel(n)]; })); } });
         rows.push({ section: T("Display") });
+        rows.push(toggleRow(T("Home Screen"), "homeScreen", T("Show the Home tab in the top bar. Off: it is hidden and cannot be selected as the start screen."),
+            function () {
+                if (!TV.pref("homeScreen") && TV.pref("startTab") === "home") TV.setPref("startTab", "live");
+                TV.shell.retab();
+            }));
+        var startTabs = TV.shell.startTabs(), startTab = startTabs.filter(function (t) { return t.id === TV.pref("startTab"); })[0];
+        rows.push({ label: T("Start Screen"), value: startTab ? startTab.label : T("Live TV"), acc: "chevron",
+            desc: T("Opens on this screen when APL TV starts. Only available tabs are listed."),
+            run: function () { choose(T("Start Screen"), "startTab", TV.shell.startTabs().map(function (t) { return [t.id, t.label]; })); } });
         // js/core.js TV.SMALL: Automatic follows the memory of the device; a change restarts APL TV
         var LIGHT = [["auto", T("Automatic")], ["on", T("On")], ["off", T("Off")]], ram = TV.RAM_MB ? (TV.RAM_MB / 1024).toFixed(1).replace(".", TV.lang === "en" ? "." : ",") + " " + T("GB") : "";
         if (TV.ANDROID) rows.push({ label: T("Light Mode"), acc: "chevron",
@@ -104,6 +115,8 @@
                 choose(T("Light Mode"), "lightMode", LIGHT, function () { if (TV.pref("lightMode") !== was) setTimeout(function () { global.location.reload(); }, 300); });
             } });
         rows.push(toggleRow(T("Sports Tab"), "sportsTab", T("The Sports tab in the top bar. Off: it goes away, and Sports loads nothing at all."), function () { TV.shell.retab(); }));
+        rows.push(toggleRow(T("Movies Tab"), "moviesTab", T("The Movies tab in the top bar. Off: it is hidden and cannot be selected as the start screen."), function () { TV.shell.retab(); }));
+        rows.push(toggleRow(T("Series Tab"), "seriesTab", T("The Series tab in the top bar. Off: it is hidden and cannot be selected as the start screen."), function () { TV.shell.retab(); }));
         rows.push({ label: T("Adult Content"), value: TV.pref("showAdult") ? T("Shown") : T("Hidden"), desc: T("Categories and channels for adults are hidden everywhere."),
             run: function () {
                 if (TV.pref("showAdult")) { TV.setPref("showAdult", false); D.rebuild(); redraw(); return; }
@@ -188,7 +201,6 @@
         if (TV.updater && TV.updater.fromBundle()) rows.push({ label: T("Back to the Installed Version"), value: TV.updater.installed(), acc: "chevron",
             desc: TV.TIZEN ? T("Runs the version installed with APL Launcher Setup again, until the next update.") : T("Runs the installed version again, until the next update."), run: function () { TV.updater.reset(); } });
         rows.push({ section: T("About") });
-        rows.push({ label: T("Refresh All Playlists"), icon: "refresh", run: function () { refreshAll(); } });
         // js/crash.js: after a stop without warning, a report for the developer
         var CRASH = [["ask", T("Ask")], ["always", T("Always Send")], ["never", T("Never")]];
         rows.push({ label: T("Crash Reports"), acc: "chevron", value: { ask: T("Ask"), always: T("Always Send"), never: T("Never") }[TV.pref("crashReports")] || T("Ask"),
@@ -828,7 +840,7 @@
             redraw();
             TV.toast(D.stillComing(added.id) ? T("“{name}” is ready. Its other movies and series keep coming in the background.", { name: added.name }) : T("“{name}” is ready", { name: added.name }), true);
             TV.epg.loadAll(true);
-            TV.shell.go("home");
+            TV.shell.go("live");
         });
     }
 
@@ -904,7 +916,7 @@
     function stopPhone() { clearInterval(pollTimer); pollTimer = null; TV.helper.close(); }
 
     /* ---------- loading, with progress ---------- */
-    function loadWithProgress(src, done) {
+    function loadWithProgress(src, done, quietError) {
         var rootA = TV.$("alert");
         rootA.innerHTML = "";
         var box = el("div", "alert__box");
@@ -920,8 +932,14 @@
             done(true);
         }, function (e) {
             rootA.classList.remove("is-open"); TV.popNav(blocker);
-            TV.alert({ title: T("Could not load “{name}”", { name: src.name }), message: e.message + "\n\n" + T("Check the address and your details, then try again.") });
-            done(false);
+            if (quietError) { done(false); return; }
+            function continueAfterError() { done(false); }
+            TV.alert({
+                title: T("Could not load “{name}”", { name: src.name }),
+                message: e.message + "\n\n" + T("Check the address and your details, then try again."),
+                buttons: [{ label: T("OK"), run: continueAfterError }],
+                onCancel: continueAfterError
+            });
         });
     }
     function refreshAll() {
@@ -930,7 +948,7 @@
         var i = 0;
         (function next() {
             if (i >= list.length) { TV.epg.loadAll(true); redraw(); return; }
-            loadWithProgress(list[i++], next);
+            loadWithProgress(list[i++], next, true);
         })();
     }
 
@@ -954,17 +972,46 @@
         redraw(pages[pages.length - 1]._index || 0);
     }
     function replaceTop(p) { var idx = nav ? nav.index : 0; pages[pages.length - 1] = p; redraw(idx); }
+    function stopProgressPoll() {
+        if (progressTimer) { clearInterval(progressTimer); progressTimer = null; }
+        progressSnapshot = "";
+    }
+    function progressState() {
+        return D.sources().map(function (s) {
+            var ld = !s.off && D.loadingOf && D.loadingOf(s.id);
+            return ld && ld.share ? s.id + ":" + Math.round(ld.share * 100) : "";
+        }).join("|");
+    }
+    function updateProgressValues() {
+        D.sources().forEach(function (s) {
+            var value = progressValueEls[s.id];
+            if (value) value.textContent = fmtCount(s);
+        });
+    }
+    function syncProgressPoll() {
+        var page = pages[pages.length - 1];
+        if (!visible || !page || page.title !== T("Settings")) { stopProgressPoll(); return; }
+        if (progressTimer) return;
+        progressSnapshot = progressState();
+        progressTimer = setInterval(function () {
+            var current = pages[pages.length - 1];
+            if (!visible || !current || current.title !== T("Settings")) { stopProgressPoll(); return; }
+            var next = progressState();
+            if (next !== progressSnapshot) { progressSnapshot = next; updateProgressValues(); }
+        }, 1000);
+    }
     function redraw(index) {
         if (!root) build();
         var p = pages[pages.length - 1];
         if (p.title === T("Settings")) { p = pages[pages.length - 1] = mainPage(); }
         else if (p.rebuild && !p.custom) { var idx0 = p._index; p = pages[pages.length - 1] = p.rebuild(); p._index = idx0; }
-        if (p.custom) { p.custom(); return; }
+        if (p.custom) { syncProgressPoll(); p.custom(); return; }
         if (!heroIcon.parentNode || !listWrap.parentNode) build();
         var keep = typeof index === "number" ? index : (nav ? nav.index : 0);
         heroIcon.innerHTML = p.preview ? p.preview() : TV.icon(p.icon || "gear", 190);
         listEl.innerHTML = "";
         var tiles = [], rows = [];
+        progressValueEls = {};
         p.rows.forEach(function (r) {
             if (r.section) { listEl.appendChild(el("div", "srow__section", esc(r.section))); return; }
             var e = el("div", "srow" + (r.danger ? " srow--danger" : "") + (r.action ? " srow--action" : ""));
@@ -972,6 +1019,7 @@
                 (r.value !== undefined ? "<span class='srow__value" + (r.secret ? " is-secret" : "") + "'>" + esc(r.value) + "</span>" : "") +
                 (r.acc === "chevron" ? "<span class='srow__acc'>" + TV.icon("chevron", 24) + "</span>" : "");
             r._el = e;
+            if (r.progressSource) progressValueEls[r.progressSource] = e.querySelector(".srow__value");
             listEl.appendChild(e);
             tiles.push(e); rows.push(r);
         });
@@ -988,6 +1036,7 @@
         nav.setTiles(tiles, Math.min(keep, tiles.length - 1));
         if (TV.shell.focusOn() !== "view" || !visible) nav.blur();
         if (!tiles.length) heroDesc.textContent = p.desc || "";
+        syncProgressPoll();
     }
     function applyMotion() { document.body.classList.toggle("reduce-motion", !TV.pref("motion")); }
     applyMotion();
@@ -1000,7 +1049,7 @@
             if (!pages.length) pages = [mainPage()];
             redraw();
         },
-        hide: function () { visible = false; var p = pages[pages.length - 1]; if (p && p.onLeave) p.onLeave(); if (p && p.custom) pages.pop(); TV.$("bg").classList.remove("is-dark"); },
+        hide: function () { visible = false; stopProgressPoll(); var p = pages[pages.length - 1]; if (p && p.onLeave) p.onLeave(); if (p && p.custom) pages.pop(); TV.$("bg").classList.remove("is-dark"); },
         enter: function () { if (nav) nav.refocus(); },
         blur: function () { if (nav) nav.blur(); },
         key: function (code) {

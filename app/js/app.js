@@ -1,9 +1,9 @@
 /* ============================================================
    app.js: start-up and the tab bar.
-   Tabs at the top, tvOS style: Home, Live TV, Guide, Movies, Series,
-   Search, Settings. ▼ goes into the page, ▲ at its top comes back to the
-   tabs. Back: from a page to its tab, from a tab to Home, from Home asks
-   whether to quit.
+   Tabs at the top, tvOS style: optional Home, Live TV, Guide, Sports,
+   optional Movies and Series, Search, Settings, and media servers. ▼ goes
+   into the page, ▲ at its top comes back to the
+   tabs. Back: from a page to its tab, from a tab asks whether to quit.
    APL Launcher (or anything) can open a channel directly:
    app control data  channel=<channel id>  or  play=last.
    ============================================================ */
@@ -11,7 +11,7 @@
     "use strict";
 
     var TV = global.TV, el = TV.el, esc = TV.esc, T = TV.t, D = TV.data;
-    TV.VERSION = "1.4.16.1";
+    TV.VERSION = "1.4.16.2";
     TV.DONATE = "https://ko-fi.com/knikt";     // the Ko-fi page for donations (Settings > About, README, .github/FUNDING.yml)
     var BASE = [
         { id: "home", label: T("Home") },
@@ -31,11 +31,19 @@
         var media = TV.library ? TV.library.tabs() : [];
         mediaIds = media.map(function (t) { return t.id + "=" + t.label; }).join(",");
         // Settings > Display > Sports Tab off (#25): no Sports tab, and nothing of Sports ever loads (it loads when shown)
-        var base = BASE.filter(function (t) { return t.id !== "sports" || TV.pref("sportsTab") !== false; });
-        // little memory (core.js TV.SMALL): the TV guide off takes its tab away too
-        if (TV.SMALL && TV.pref("tvGuide") === false) base = base.filter(function (t) { return t.id !== "guide"; });
-        var after = base.map(function (t) { return t.id; }).indexOf("series") + 1;
+        var base = BASE.filter(function (t) {
+            if (t.id === "home") return !!TV.pref("homeScreen");
+            if (t.id === "movies") return TV.pref("moviesTab") !== false;
+            if (t.id === "series") return TV.pref("seriesTab") !== false;
+            return t.id !== "sports" || TV.pref("sportsTab") !== false;
+        });
+        if (TV.pref("tvGuide") === false) base = base.filter(function (t) { return t.id !== "guide"; });
+        var after = base.map(function (t) { return t.id; }).indexOf("series");
+        if (after < 0) after = base.map(function (t) { return t.id; }).indexOf("movies");
+        if (after < 0) after = base.map(function (t) { return t.id; }).indexOf("live");
+        after++;
         TABS = base.slice(0, after).concat(media, base.slice(after));
+        if (!startTabs().some(function (t) { return t.id === TV.pref("startTab"); })) TV.setPref("startTab", "live");
         var nav = TV.$("tabs");
         nav.innerHTML = "";
         tabEls = TABS.map(function (t) {
@@ -51,37 +59,56 @@
         });
     }
     function viewOf(id) { return TV.views[id]; }
+    function startTabs() {
+        return TABS.filter(function (t) { return t.id !== "search" && t.id !== "settings"; });
+    }
 
     function go(id, enter) {
         var i = TABS.map(function (t) { return t.id; }).indexOf(id);
         if (i < 0) return;
         tabIndex = i;
         if (current !== id) {
-            if (current && viewOf(current)) viewOf(current).hide();
+            if (id === "home" && (current === "live" || current === "guide")) TV.live.deferResume();
+            if (current && viewOf(current)) viewOf(current).hide(id);
             document.querySelectorAll(".view").forEach(function (v) { v.classList.remove("is-on"); });
             TV.$("v-" + id).classList.add("is-on");
             current = id;
             var t0 = Date.now();
             viewOf(id).show();
             if (TV.DEV) requestAnimationFrame(function () { requestAnimationFrame(function () { TV.log("page " + id + " shown in " + (Date.now() - t0) + " ms"); }); });
-            if (id !== "live" && id !== "guide") TV.setPref("startTab", id === "settings" || id === "search" ? "home" : id);
         }
         if (enter) toView(); else { focusOn = "tabs"; viewOf(id).blur(); }
         paintTabs();
         TV.$("top").classList.remove("is-hidden");
+        scheduleForeground();
     }
     function toView() {
         focusOn = "view";
         paintTabs();
         viewOf(current).enter();
+        scheduleForeground();
     }
     function toTabs() {
         focusOn = "tabs";
         viewOf(current).blur();
         paintTabs();
+        scheduleForeground();
     }
 
-    var switchTimer = null;
+    var switchTimer = null, foregroundTimer = null;
+    function scheduleForeground() {
+        clearTimeout(foregroundTimer);
+        if (current !== "live" && current !== "guide") return;
+        var id = current;
+        foregroundTimer = setTimeout(function () {
+            if (current !== id || TV.topNav() !== screen || TV.osd.isOpen() || TV.multiview.isOpen()) return;
+            var ch = TV.live.playingChannel();
+            if (!ch) return;
+            var state = TV.player.state();
+            if (state === "PLAYING") TV.live.promoteChannel(ch);
+            else if (state === "READY" || state === "IDLE") scheduleForeground();
+        }, current === "live" ? 3000 : 10000);
+    }
     var screen = {
         key: function (code) {
             var K = TV.KEY;
@@ -89,31 +116,34 @@
                 if (code === K.LEFT || code === K.RIGHT) {
                     var n = tabIndex + (code === K.LEFT ? -1 : 1);
                     if (n < 0 || n >= TABS.length) { TV.sound.edge(); return; }
+                    clearTimeout(foregroundTimer);
                     tabIndex = n; TV.sound.tick(); paintTabs();
                     clearTimeout(switchTimer);
                     switchTimer = setTimeout(function () { go(TABS[tabIndex].id); }, 110);
                     return;
                 }
                 if (code === K.DOWN) { clearTimeout(switchTimer); if (current !== TABS[tabIndex].id) go(TABS[tabIndex].id); TV.sound.tick(); toView(); return; }
-                if (TV.isBack(code)) { if (current !== "home") go("home"); else askQuit(); return; }
-                if (TV.digit(code) >= 0 || code === K.CH_UP || code === K.CH_DOWN) { go("live", true); viewOf("live").key(code); return; }
+                if (TV.isBack(code)) { askQuit(); return; }
+                if (TV.digit(code) >= 0 || code === K.CH_UP || code === K.CH_DOWN) { go("live", true); viewOf("live").key(code); scheduleForeground(); return; }
                 return;
             }
             var v = viewOf(current);
             if (TV.isBack(code)) {
-                if (v.backHandled && v.backHandled()) return;
+                if (v.backHandled && v.backHandled()) { scheduleForeground(); return; }
                 toTabs();
                 return;
             }
             var handled = v.key(code);
             if (!handled && code === K.UP) { TV.sound.tick(); toTabs(); }
+            else if (handled) scheduleForeground();
         },
         ok: function () {
             if (focusOn === "tabs") { clearTimeout(switchTimer); if (current !== TABS[tabIndex].id) go(TABS[tabIndex].id); toView(); return; }
             viewOf(current).ok();
+            scheduleForeground();
         },
         canHold: function () { var v = viewOf(current); return focusOn === "view" && !!v.longOk && (!v.canHold || v.canHold()); },
-        longOk: function () { viewOf(current).longOk(); }
+        longOk: function () { clearTimeout(foregroundTimer); viewOf(current).longOk(); }
     };
     function askQuit() {
         TV.alert({ title: T("Quit APL TV?"), buttons: [{ label: T("Quit"), run: function () { TV.player.stop(); TV.exit(); } }, { label: T("Cancel") }], focus: 1 });
@@ -131,7 +161,7 @@
         var was = TABS[tabIndex] && TABS[tabIndex].id;
         buildTabs();
         var ids = TABS.map(function (t) { return t.id; });
-        if (current && ids.indexOf(current) < 0) { go("home"); return; }
+        if (current && ids.indexOf(current) < 0) { go("live"); return; }
         tabIndex = Math.max(0, ids.indexOf(was));
         paintTabs();
     }
@@ -140,6 +170,7 @@
         screen: screen, go: go, toTabs: toTabs, toView: toView,
         focusOn: function () { return focusOn; },
         current: function () { return current; },
+        startTabs: startTabs,
         retab: function () { if (tabEls.length) retab(); },
         refreshView: function () { if (current && TV.topNav() === screen) { var v = viewOf(current); if (v.show) v.show(); if (focusOn === "view") v.enter(); else v.blur(); paintTabs(); } }
     };
@@ -173,7 +204,8 @@
                 if (it.kind === "movie") TV.detail.play(it, r && !r.done ? r.pos : 0); else TV.detail.open(it, { resume: true });
                 return true;
             }
-            if (m.tab && TV.views[m.tab]) { go(m.tab, true); return true; }
+            var requestedTab = m.tab === "home" && !TV.pref("homeScreen") ? "live" : m.tab;
+            if (requestedTab && TV.views[requestedTab]) { go(requestedTab, true); return true; }
             // a page of Settings to add a source (APL Launcher, a test): settings=phone|media|plex|jellyfin|stremio
             if (m.settings && TV.setup && /^(phone|media|plex|jellyfin|stremio)$/.test(m.settings)) { TV.setup.media(m.settings); return true; }
             // A search asked from outside (voice, APL Launcher): search=<words>
@@ -275,9 +307,9 @@
         try { if (TV.DEV && navigator.storage && navigator.storage.estimate) navigator.storage.estimate().then(function (e) { TV.log("storage " + Math.round(e.usage / 1048576) + " MB used of " + Math.round(e.quota / 1048576) + " MB"); }); } catch (e) {}
         D.start(function (m) { bootMsg.textContent = m; }).then(function () {
             var hasData = D.sources().length && D.catalog() && (D.catalog().live.chans.length || D.catalog().movies.items.length);
-            var tab = TV.pref("startTab") || "home";
-            if (tab === "settings" || tab === "search" || !TV.views[tab] || !TABS.some(function (t) { return t.id === tab; })) tab = "home";
-            go(hasData ? tab : "home", true);
+            var startTab = TV.pref("startTab");
+            if (!startTabs().some(function (t) { return t.id === startTab; })) startTab = "live";
+            go(startTab, true);
             // the first start (or the first after this update): how to show the playlist, then the rest
             function offers() {
                 if (TV.pref("setupDone") !== 1 && TV.playlistSetup) setTimeout(function () { TV.playlistSetup(function () { if (hasData) setTimeout(offerResume, 800); }); }, 700);
@@ -293,7 +325,7 @@
         }, function (e) {
             TV.log("start failed: " + e.message);
             global.TV_BOOT_OK = true;
-            go("home", true);
+            go("live", true);
             TV.$("boot").classList.add("is-hidden");
         });
     }

@@ -31,6 +31,19 @@ if "--out" in sys.argv:
 
 config = open(os.path.join(A, "config.xml"), encoding="utf-8").read()
 version = re.search(r'<widget[^>]*\sversion="([^"]+)"', config).group(1)
+
+# webOS accepts only three numeric version components. APL TV's fourth
+# component is a release revision, so fold it into the patch component.
+version_parts = version.split(".")
+if len(version_parts) not in (3, 4) or any(not part.isdigit() for part in version_parts):
+    sys.exit("unsupported app version for webOS: " + version)
+major, minor, patch = (int(part) for part in version_parts[:3])
+revision = int(version_parts[3]) if len(version_parts) == 4 else 0
+if revision > 99:
+    sys.exit("webOS version revision must be between 0 and 99: " + version)
+webos_version = "%d.%d.%d" % (major, minor, patch * 100 + revision)
+if any(len(part) > 9 for part in webos_version.split(".")):
+    sys.exit("webOS version components cannot exceed 9 digits: " + webos_version)
 work = os.path.join(out, "webos")
 app_dir, svc_dir = os.path.join(work, "app"), os.path.join(work, "service")
 shutil.rmtree(work, ignore_errors=True)
@@ -90,7 +103,7 @@ splash.save(os.path.join(app_dir, "splash.png"))
 
 appinfo = {
     "id": APP_ID,
-    "version": version,
+    "version": webos_version,
     "vendor": "Knikt (Gero Corp.)",
     "type": "web",
     "main": "index.html",
@@ -109,7 +122,7 @@ json.dump(appinfo, open(os.path.join(app_dir, "appinfo.json"), "w", encoding="ut
 # ---- the helper service
 shutil.copy2(os.path.join(ROOT, "webos", "service", "index.js"), os.path.join(svc_dir, "index.js"))
 shutil.copy2(os.path.join(A, "service", "service.js"), os.path.join(svc_dir, "service.js"))
-json.dump({"name": SERVICE_ID, "version": version, "main": "index.js", "description": "APL TV helper"},
+json.dump({"name": SERVICE_ID, "version": webos_version, "main": "index.js", "description": "APL TV helper"},
           open(os.path.join(svc_dir, "package.json"), "w", encoding="utf-8", newline="\n"), indent=2)
 json.dump({"id": SERVICE_ID, "description": "Phone setup page, TV guides and network helper for APL TV",
            "services": [{"name": SERVICE_ID, "description": "APL TV helper"}]},
@@ -123,7 +136,7 @@ ares = shutil.which("ares-package") or shutil.which("ares-package.cmd")
 if not ares:
     sys.exit("ares-package not found: npm install -g @webos-tools/cli")
 subprocess.check_call([ares, "--no-minify", "-o", out, app_dir, svc_dir])
-ipk = os.path.join(out, "%s_%s_all.ipk" % (APP_ID, version))
+ipk = os.path.join(out, "%s_%s_all.ipk" % (APP_ID, webos_version))
 if release:
     # The published names, its SHA256, and the manifest the webOS Homebrew Channel reads to install it
     import hashlib
@@ -135,7 +148,7 @@ if release:
     open(os.path.join(out, "SHA256SUMS-ipk.txt"), "w", encoding="utf-8", newline="\n").write("%s  %s\n" % (h, os.path.basename(ipk)))
     repo = os.environ.get("GITHUB_REPOSITORY") or "Knikt/APL-TV"
     manifest = {
-        "id": APP_ID, "version": version, "type": "web", "title": "APL TV",
+        "id": APP_ID, "version": webos_version, "type": "web", "title": "APL TV",
         "appDescription": "Live TV, movies and series from your own playlists, in the style of Apple TV",
         "iconUri": "https://raw.githubusercontent.com/%s/main/app/icon.png" % repo,
         "sourceUrl": "https://github.com/%s" % repo, "rootRequired": False,

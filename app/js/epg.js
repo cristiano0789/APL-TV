@@ -79,16 +79,44 @@
         return c.n !== undefined ? (c.n ? expand(c) : null) : c;
     }
 
-    function at(ch, t) {
+    /* Merge duplicate slots and let a later programme take over when portal times overlap. */
+    function timeline(ch) {
         var l = list(ch);
+        if (!l || l.length < 2) return l;
+        var out = [l[0].slice()];
+        for (var i = 1; i < l.length; i++) {
+            var prev = out[out.length - 1], p = l[i].slice();
+            var title = S.fold(prev[2] || "");
+            if (p[0] < prev[1] && title && title === S.fold(p[2] || "")) {
+                prev[1] = Math.max(prev[1], p[1]);
+                if (!prev[3] && p[3]) prev[3] = p[3];
+            } else {
+                if (p[0] < prev[1]) prev[1] = p[0];
+                if (p[0] === prev[0]) out[out.length - 1] = p;
+                else out.push(p);
+            }
+        }
+        return out;
+    }
+
+    function at(ch, t) {
+        var l = timeline(ch);
         if (!l) return null;
-        for (var i = 0; i < l.length; i++) if (l[i][0] <= t && l[i][1] > t) return { cur: l[i], next: l[i + 1] || null, i: i };
+        var current = -1;
+        for (var i = 0; i < l.length; i++) {
+            if (l[i][0] <= t && l[i][1] > t && (current < 0 || l[i][0] >= l[current][0])) current = i;
+        }
+        if (current >= 0) {
+            var next = null;
+            for (i = 0; i < l.length; i++) if (l[i][0] > t && (!next || l[i][0] < next[0])) next = l[i];
+            return { cur: l[current], next: next, i: current };
+        }
         for (i = 0; i < l.length; i++) if (l[i][0] > t) return { cur: null, next: l[i], i: i };
         return null;
     }
     function now(ch) { return at(ch, Date.now()); }
     function range(ch, from, to) {
-        var l = list(ch);
+        var l = timeline(ch);
         if (!l) return [];
         return l.filter(function (p) { return p[1] > from && p[0] < to; });
     }

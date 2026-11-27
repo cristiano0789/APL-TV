@@ -28,7 +28,7 @@
     // "##### FRANCE #####", "✦●✦| GENERAL FHD |✦●✦", "UK| ✦●✦ KIDS ✦●✦": a title between rows of signs, not a channel
     var SEPARATOR = /^[\s#=*\-_~•●◆★☆▶►|.✦✧✪✶❖◇◈♦■□▪━═─]{3,}.*[#=*\-_~•●◆★☆◀◄|.✦✧✪✶❖◇◈♦■□▪━═─]{3,}\s*$|^[#=*\-_~]{4,}/;
     var DECOR = /[★☆●◆■□▶►◀◄♦♥♠♣✪✦✧⭐🔥⚽🎬📺🎥🇫🇷]|[☀-➿]|[\ud83c-\ud83e][\udc00-\udfff]/g;
-    var QUALITY = /\b(UHD|4K|2160P?|FHD|1080P?|HD|720P?|SD|576P?|480P?|HEVC|H\.?265|H\.?264|HDR|50FPS|60FPS|LOW|HQ|RAW|BACKUP)\b/gi;
+    var QUALITY = /\b(UHD|4K|2160P?|FULLHD|FHD|1080P?|HD|720P?|SD|576P?|480P?|HEVC|H\.?265|H\.?264|HDR|50FPS|60FPS|LOW|HQ|RAW|BACKUP)\b/gi;
 
     var PRIMARY = { fr: ["FR", "FRA", "FRANCE"], it: ["IT", "ITA", "ITALIA", "ITALY"], en: ["UK", "GB", "US", "USA", "EN", "ENG"] };
     /* "SOUTH AFRICA" -> "South Africa"; short words (TV, HD, TNT, C+) stay as they are */
@@ -159,6 +159,29 @@
     var RE_SERIES = /\b(s[ée]ries?|tv ?shows?|saisons?|seasons?)\b/i;
     var RE_MOVIES = /\b(vod|films?|movies?|cin[ée]ma|cinema|box ?office|4k ?movies?)\b/i;
 
+    function qualityFromStats(stats) {
+        if (!stats) return "";
+        var w = parseInt(stats.w, 10) || 0, h = parseInt(stats.h, 10) || 0;
+        var resolution = w && h ? Math.min(w, h) : Math.max(w, h);
+        if (resolution >= 2000) return "4K";
+        if (resolution >= 1000) return "FHD";
+        if (resolution >= 700) return "HD";
+        return resolution > 0 ? "SD" : "";
+    }
+    function channelQuality(ch) {
+        var saved = TV.pref("channelQuality") || {};
+        return ch && (typeof saved === "object" && saved[ch.id] || ch.q) || "";
+    }
+    function rememberChannelQuality(ch, stats) {
+        var q = qualityFromStats(stats);
+        if (!ch || !ch.id || !q || channelQuality(ch) === q) return false;
+        var saved = TV.pref("channelQuality") || {}, next = {};
+        Object.keys(saved).forEach(function (id) { next[id] = saved[id]; });
+        next[ch.id] = q;
+        TV.setPref("channelQuality", next);
+        return true;
+    }
+
     TV.smart = {
         isAdult: function (s) { return ADULT.test(String(s || "")); },
         groupName: groupName,
@@ -197,16 +220,19 @@
             // what is left of a provider's codes before the name: "PPV| UFC 1", "UK-WAFCON| Channel 4", "VIP| Shahid", "24/7-EN - Batman"
             s = s.replace(/^(?:[A-Z0-9][A-Z0-9+\-\/.]{0,11}(?: [A-Z]{2,3})?\s*\|\s*)+/, function (p) { return p.length < s.length ? "" : p; })
                  .replace(/^24\/7[\s-]*(?:[A-Z]{2,3})?\s*[-|:]\s*/i, "");
-            var qm = s.toUpperCase().match(/\b(UHD|4K|2160P?|FHD|1080P?|HD|720P?|SD|576P?|480P?)\b/);
+            var qm = s.toUpperCase().match(/\b(UHD|4K|2160P?|FULLHD|FHD|1080P?|HD|720P?|SD|576P?|480P?)\b/);
             if (qm) {
                 var v = qm[1];
-                q = /UHD|4K|2160/.test(v) ? "4K" : /FHD|1080/.test(v) ? "FHD" : /HD|720/.test(v) ? "HD" : "SD";
+                q = /UHD|4K|2160/.test(v) ? "4K" : /FULLHD|FHD|1080/.test(v) ? "FHD" : /HD|720/.test(v) ? "HD" : "SD";
             }
             var base = cleanSpaces(s.replace(QUALITY, " ").replace(/[\[\(]\s*[\]\)]/g, " "));
             var key = base.toLowerCase().replace(/[^a-z0-9À-ɏ+]+/g, "").replace(/\+/g, "plus");
             return { name: base || s || name, quality: q, key: (t.lang || "") + ":" + key, tag: t.tag, lang: t.lang };
         },
         qualityRank: function (q) { return { "4K": 4, FHD: 3, HD: 2, SD: 1 }[q] || 0; },
+        qualityFromStats: qualityFromStats,
+        channelQuality: channelQuality,
+        rememberChannelQuality: rememberChannelQuality,
 
         /* "FR - Avatar (2009) [MULTI] 4K" -> { title: "Avatar", year: 2009 } */
         title: function (name) {

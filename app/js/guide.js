@@ -70,7 +70,8 @@
         var now = Date.now();
         for (var i = first; i < last; i++) {
             var ch = chans[i], r = el("div", "grow");
-            var chEl = el("div", "grow__ch" + (playingId === ch.id ? " is-current" : ""));
+            var isPlaying = playingId === ch.id || (ch.variants && ch.variants.some(function (v) { return v.id === playingId; }));
+            var chEl = el("div", "grow__ch" + (isPlaying ? " is-current" : ""));
             var logo = el("div", "grow__logo");
             TV.logoBox(logo, ch);
             chEl.appendChild(el("div", "grow__num", String(ch.num)));
@@ -105,8 +106,12 @@
 
     function focusedCell() {
         var list = cells[row] || [];
-        for (var i = 0; i < list.length; i++) { var p = list[i]._p; if (p[0] <= focusTime && p[1] > focusTime) return list[i]; }
-        return list[0] || null;
+        var current = null;
+        for (var i = 0; i < list.length; i++) {
+            var p = list[i]._p;
+            if (p[0] <= focusTime && p[1] > focusTime && (!current || p[0] >= current._p[0])) current = list[i];
+        }
+        return current || list[0] || null;
     }
     function markFocus() {
         Object.keys(cells).forEach(function (k) { cells[k].forEach(function (c) { c.classList.remove("is-focused"); }); });
@@ -149,11 +154,14 @@
         chans = D.channelsIn(catId);
         if (!chans.length && catId !== "all") { catId = "all"; chans = D.channelsIn("all"); }
         row = 0;
-        var last = TV.pref("lastChannel");
-        for (var i = 0; i < chans.length; i++) if (chans[i].id === last) { row = i; break; }
+        var active = TV.live.playingChannel(), last = active ? active.id : TV.pref("lastChannel");
+        playingId = active ? active.id : null;
+        for (var i = 0; i < chans.length; i++) {
+            if (chans[i].id === last || (chans[i].variants && chans[i].variants.some(function (v) { return v.id === last; }))) { row = i; break; }
+        }
         t0 = startOfWindow(Date.now());
         focusTime = Date.now();
-        scrollY = 0;
+        scrollY = Math.max(0, row * ROW_H - (580 - ROW_H) / 2);
         drawRuler(); drawRows();
     }
 
@@ -169,15 +177,20 @@
             visible = true;
             document.body.classList.add("in-guide");
             load();
+            var active = TV.live.playingChannel();
+            if (active) playingId = active.id;
             if (TV.pref("guideKeep")) {
-                var last = D.channel(TV.pref("lastChannel"));
-                if (last && playingId !== last.id) { playingId = last.id; TV.live.playChannel(last, RECT); }
+                var last = active || D.channel(TV.pref("lastChannel"));
+                if (last) {
+                    if (!active || active.id !== last.id || TV.player.state() === "NONE") TV.live.playChannel(last, RECT);
+                    playingId = last.id;
+                }
             }
         },
-        hide: function () {
+        hide: function (next) {
             visible = false; clearTimeout(previewTimer);
             document.body.classList.remove("in-guide");
-            if (!TV.osd.isOpen() && !TV.multiview.isOpen()) { TV.player.stop(); playingId = null; }
+            if (next !== "live" && !TV.osd.isOpen() && !TV.multiview.isOpen()) { TV.player.stop(); playingId = null; }
         },
         enter: function () { zone = "grid"; markFocus(); schedulePreview(); },
         blur: function () { markFocus(); },

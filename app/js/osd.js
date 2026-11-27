@@ -534,7 +534,7 @@
             });
         }
         var rank = TV.smart && TV.smart.qualityRank ? TV.smart.qualityRank : function () { return 0; };
-        vMemo = { id: c.id, cat: cat, list: mine.length < 2 ? [] : mine.sort(function (a, b) { return rank(b.q) - rank(a.q); }) };
+        vMemo = { id: c.id, cat: cat, list: mine.length < 2 ? [] : mine.sort(function (a, b) { return rank(TV.smart.channelQuality(b)) - rank(TV.smart.channelQuality(a)); }) };
         return vMemo.list;
     }
     var vMemo = {};
@@ -558,7 +558,7 @@
         if (vs.length > 1) {
             items.push({ head: T("Versions of This Channel") });
             vs.forEach(function (v) {
-                items.push({ label: v.q || T("Standard"), sub: v.raw || v.name, check: !!ch && v.id === ch.id, run: function () {
+                items.push({ label: TV.smart.channelQuality(v) || T("Standard"), sub: v.raw || v.name, check: !!ch && v.id === ch.id, run: function () {
                     closePop();
                     if (!ch || v.id === ch.id) return;
                     prevCh = ch; ch = v;
@@ -754,7 +754,8 @@
         bar.innerHTML = "";
         bar.appendChild(logo);
         var txt = el("div", "osd__txt");
-        txt.innerHTML = "<div class='osd__ch'><span class='badge'>" + ch.num + "</span><b>" + esc(ch.name) + "</b>" + (ch.q ? "<span class='badge'>" + esc(ch.q) + "</span>" : "") +
+        var quality = TV.smart.channelQuality(ch);
+        txt.innerHTML = "<div class='osd__ch'><span class='badge'>" + ch.num + "</span><b>" + esc(ch.name) + "</b>" + (quality ? "<span class='badge'>" + esc(quality) + "</span>" : "") +
             (D.isFav(ch.id) ? "<span style='color:#ffd60a;display:flex'>" + TV.icon("star", 24) + "</span>" : "") + "</div>" +
             "<div class='osd__title'>" + esc(cur ? cur[2] : T("No programme information")) + "</div>" +
             (cur ? "<div class='osd__time'><span>" + TV.hhmm(cur[0]) + "</span><div class='bar'><i style='width:" + Math.round(TV.epg.progress(cur) * 100) + "%'></i></div><span>" + TV.hhmm(cur[1]) + "</span><span>" +
@@ -1415,6 +1416,10 @@
 
     TV.osd = {
         live: live, vod: vodPlay, isOpen: function () { return open; }, buffering: buffering, error: error, number: number,
+        qualityChanged: function (id) {
+            vMemo = {};
+            if (open && mode === "live" && ch && ch.id === id) drawLive();
+        },
         close: function () { if (open) finish(); }, current: function () { return ch; }, voice: voice
     };
     TV.subtitles = { options: SUB, apply: applySubStyle, sample: sampleSub, hash: osSum, speed: speedFactor, parse: parseSubs };

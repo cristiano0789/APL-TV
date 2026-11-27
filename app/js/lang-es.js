@@ -1018,6 +1018,20 @@ window.TV_LANG_ES = {
     "Sports Tab": "Pestaña Deportes",
     "The Sports tab in the top bar. Off: it goes away, and Sports loads nothing at all.":
         "La pestaña Deportes de la barra superior. Desactivado: desaparece y Deportes no carga nada.",
+    "Home Screen": "Pantalla de inicio",
+    "Show the Home tab in the top bar. Off: it is hidden and cannot be selected as the start screen.":
+        "Muestra la pestaña Inicio en la barra superior. Desactivado: se oculta y no se puede elegir como pantalla de inicio.",
+    "Start Screen": "Pantalla de inicio",
+    "Opens on this screen when APL TV starts. Only available tabs are listed.":
+        "Pantalla que se muestra al iniciar APL TV. Solo aparecen las pestañas disponibles.",
+    "Opens on this screen when APL TV starts. Search and Settings are not available as start screens.":
+        "Pantalla que se muestra al iniciar APL TV. Buscar y Ajustes no pueden elegirse como pantalla de inicio.",
+    "Movies Tab": "Pestaña Películas",
+    "The Movies tab in the top bar. Off: it is hidden and cannot be selected as the start screen.":
+        "La pestaña Películas de la barra superior. Desactivada: se oculta y no se puede elegir como pantalla de inicio.",
+    "Series Tab": "Pestaña Series",
+    "The Series tab in the top bar. Off: it is hidden and cannot be selected as the start screen.":
+        "La pestaña Series de la barra superior. Desactivada: se oculta y no se puede elegir como pantalla de inicio.",
     "Your Guides": "Tus guías",
     "Add the address of an XMLTV guide (.xml or .xml.gz): its programmes fill the channels your provider's guide misses. Matched by channel name.":
         "Añade la dirección de una guía XMLTV (.xml o .xml.gz): sus programas completan los canales que le faltan a la guía de tu proveedor. Se asocian por el nombre del canal.",

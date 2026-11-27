@@ -16,7 +16,7 @@
 
     var TV = global.TV, S = TV.smart, T = TV.t;
     var MAX_AGE = (TV.SMALL ? 24 : 6) * 3600 * 1000;    // a device with little memory: once a day (core.js TV.SMALL)
-    var CATALOG_V = 2;          // raise it when smart.js reads names differently: catalogs are then refreshed
+    var CATALOG_V = 3;          // raise it when smart.js reads names differently: catalogs are then refreshed
 
     /* ---------- sources ---------- */
     function sources() { return TV.load("sources", []) || []; }
@@ -649,10 +649,10 @@
                 out.push(e);
             });
             // 4K first only where it plays (TV.canUhd: a Fire TV Stick froze the picture of TF1 4K); else after HD
-            var uhd = !TV.canUhd || TV.canUhd(), rank = function (q) { var n = S.qualityRank(q); return n === 4 && !uhd ? 1.5 : n; };
+            var uhd = !TV.canUhd || TV.canUhd(), rank = function (c) { var n = S.qualityRank(S.channelQuality(c)); return n === 4 && !uhd ? 1.5 : n; };
             out = out.map(function (e) {
                 if (!e.variants) return e.self;
-                var v = e.variants.slice().sort(function (a, b) { return rank(b.q) - rank(a.q); });
+                var v = e.variants.slice().sort(function (a, b) { return rank(b) - rank(a); });
                 var best = v[0], copy = {};
                 Object.keys(best).forEach(function (k) { copy[k] = best[k]; });
                 copy.variants = v; copy.num = Math.min.apply(null, v.map(function (x) { return x.num; }));
@@ -869,7 +869,8 @@
         for (var i = 0; i < chans.length && out.chans.length < 40000; i++) {
             var c = chans[i], ct = catOf(c);
             if (!adult && ct.adult) continue;
-            out.chans.push([c.id, c.name + (c.q ? " " + c.q : ""), ct.name || "", c.orig || c.name]);
+            var q = S.channelQuality(c);
+            out.chans.push([c.id, c.name + (q ? " " + q : ""), ct.name || "", c.orig || c.name]);
         }
         return out;
     }
@@ -911,7 +912,7 @@
                 var ids = (h[key].ids || [key]).filter(function (id) { return want[id]; });
                 if (ids.length) { kept[key] = { t: h[key].t, at: h[key].at, ids: ids }; ids.forEach(function (id) { delete want[id]; }); }
             });
-            Object.keys(want).forEach(function (id) { var c = channel(id); kept[id] = { t: c ? c.name + (c.q ? " " + c.q : "") : id, at: Date.now(), ids: [id] }; });
+            Object.keys(want).forEach(function (id) { var c = channel(id), q = c && S.channelQuality(c); kept[id] = { t: c ? c.name + (q ? " " + q : "") : id, at: Date.now(), ids: [id] }; });
             TV.save("hiddenChans", kept); chanIdsMemo = null;
         }
         rebuild();

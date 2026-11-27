@@ -138,7 +138,7 @@
         function score(c) {
             var ri = rec.indexOf(c.id), mine = String(c.key).indexOf(TV.lang + ":") === 0 || D.catOf(c).lang === TV.lang;
             return (fav.indexOf(c.id) !== -1 ? 1000 : 0) + (ri !== -1 ? 500 - ri : 0) +
-                   (mine ? 100 : 0) + TV.smart.qualityRank(c.q) * 10 - (c.num || 0) / 100000;
+                   (mine ? 100 : 0) + TV.smart.qualityRank(TV.smart.channelQuality(c)) * 10 - (c.num || 0) / 100000;
         }
         r.sort(function (a, b) { return score(b) - score(a); });
         return r[0];
@@ -153,7 +153,7 @@
             if (kind !== "movies" && kind !== "series") {
                 var ch = null;
                 try { ch = exactChannel(q) || (q !== asSaid ? exactChannel(asSaid) : null); } catch (e) {}
-                if (ch) { log("play channel " + ch.name + " (" + (ch.q || "-") + ")"); toTop(); TV.live.play(ch); return; }
+                if (ch) { log("play channel " + ch.name + " (" + (TV.smart.channelQuality(ch) || "-") + ")"); toTop(); TV.live.play(ch); return; }
             }
             // "m6" for "m. six", unless only the words as said find something ("Les Quatre Fantastiques")
             if (q !== asSaid) {
@@ -238,7 +238,7 @@
                 // "Go to Search / Home / Settings"
                 onchangeappstate: function (s) {
                     log("onchangeappstate " + s);
-                    var tab = { Home: "home", Search: "search", Setting: "settings", List: "movies" }[s];
+                    var tab = { Home: TV.pref("homeScreen") ? "home" : "live", Search: "search", Setting: "settings", List: "movies" }[s];
                     if (!tab || !TV.views[tab]) return false;
                     toTop(); TV.shell.go(tab, true); return true;
                 },
